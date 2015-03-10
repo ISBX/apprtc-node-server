@@ -283,6 +283,7 @@ function getRoomParameters(req, roomId, clientId, isInitiator) {
   };
 
   var protocol = req.headers['x-forwarded-proto'];
+  if (!protocol) protocol = "http";
   if (roomId) {
     params['room_id'] = roomId;
     params['room_link'] =  protocol + "://" + req.headers.host + '/r/' + roomId + '?' + querystring.stringify(req.query);
@@ -336,14 +337,35 @@ function addClientToRoom(req, roomId, clientId, isLoopback, callback) {
   });
 }
 
+function saveMessageFromClient(host, roomId, clientId, message, callback) {
+  var text = JSON.stringify(message);
+  var key = getCacheKeyForRoom(host, roomId);
+  rooms.get(key, function(error, room) {
+    if (!room) {
+      console.warn('Unknown room: ' + roomId);
+      callback({error: constants.RESPONSE_UNKNOWN_ROOM}, false);
+    } else if (!room.hasClient(clientId)) {
+      console.warn('Unknown client: ' + clientId);
+      callback({error: constants.RESPONSE_UNKNOWN_CLIENT}, false);
+    } else if (room.getOccupancy() > 1) {
+      callback(null, false);
+    } else {
+      var client = room.getClient(clientId);
+      client.addMessage(text);
+      console.log('Saved message for client ' + clientId + ':' + client.toString() + ' in room ' + roomId);
+      callback(null, true);
+    }
+  });
+}
+
 router.get('/', function(req, res, next) {
   // Parse out parameters from request.
   var params = getRoomParameters(req, null, null, null);
   res.render("index_template", params);
 });
 
-router.post('/join/:id', function(req, res, next) {
-  var roomId = req.params.id;
+router.post('/join/:roomId', function(req, res, next) {
+  var roomId = req.params.roomId;
   var clientId = generateRandom(8);
   var isLoopback = req.query['debug'] == 'loopback';
   addClientToRoom(req, roomId, clientId, isLoopback, function(error, result) {
@@ -357,13 +379,37 @@ router.post('/join/:id', function(req, res, next) {
     //TODO(tkchin): Clean up response format. For simplicity put everything in
     //params for now.
     res.send({
-      result: "SUCCESS",
+      result: 'SUCCESS',
       params: params
     });
     console.log('User ' + clientId + ' joined room ' + roomId);
     console.log('Room ' + roomId + ' has state ' + result.room_state);
 
   });
+});
+
+router.post('/message/:roomId/:clientId', function(req, res, next) {
+  var roomId = req.params.roomId;
+  var clientId = req.params.clientId;
+  var message = req.body;
+  saveMessageFromClient(req.headers.host, roomId, clientId, message, function(error, saved) {
+    if (error) {
+      res.send({ result: error });
+      return;
+    }
+    if (saved) {
+      res.send({ result: constants.RESPONSE_SUCCESS });
+    } else {
+      //Other client joined, forward to collider. Do this outside the lock.
+      //  Note: this may fail in local dev server due to not having the right
+      //certificate file locally for SSL validation.
+      //  Note: loopback scenario follows this code path.
+      //  TODO(tkchin): consider async fetch here.
+      //TODO: (kchu): implement send_message_to_collider from python code
+      res.status(500).send('Implement send_message_to_collider');
+    }
+  });
+
 });
 
 
