@@ -1,5 +1,7 @@
 var util = require('util');
 var querystring = require('querystring');
+var https = require('https');
+var http = require('http');
 var express = require('express');
 var router = express.Router();
 var Rooms = require('../lib/rooms.js');
@@ -13,6 +15,8 @@ var constants = {
   WSS_HOST_ACTIVE_HOST_KEY: 'wss_host_active_host', //memcache key for the active collider host.
   WSS_HOST_PORT_PAIRS: ['apprtc-ws.webrtc.org:443', 'apprtc-ws-2.webrtc.org:443'],
   RESPONSE_ERROR: 'ERROR',
+  RESPONSE_UNKNOWN_ROOM: 'UNKNOWN_ROOM',
+  RESPONSE_UNKNOWN_CLIENT: 'UNKNOWN_CLIENT',
   RESPONSE_ROOM_FULL: 'FULL',
   RESPONSE_DUPLICATE_CLIENT: 'DUPLICATE_CLIENT',
   RESPONSE_SUCCESS: 'SUCCESS',
@@ -143,12 +147,14 @@ function getWSSParameters(req) {
   if (wssTLS && wssTLS == 'false') {
     return {
       wssUrl: 'ws://' + wssHostPortPair + '/ws',
-      wssPostUrl: 'http://' + wssHostPortPair
+      wssPostUrl: 'http://' + wssHostPortPair,
+      host: wssHostPortPair
     }
   } else {
     return {
       wssUrl: 'wss://' + wssHostPortPair + '/ws',
-      wssPostUrl: 'https://' + wssHostPortPair
+      wssPostUrl: 'https://' + wssHostPortPair,
+      host: wssHostPortPair
     }
   }
 }
@@ -338,7 +344,7 @@ function addClientToRoom(req, roomId, clientId, isLoopback, callback) {
 }
 
 function saveMessageFromClient(host, roomId, clientId, message, callback) {
-  var text = JSON.stringify(message);
+  var text = message;
   var key = getCacheKeyForRoom(host, roomId);
   rooms.get(key, function(error, room) {
     if (!room) {
@@ -405,12 +411,80 @@ router.post('/message/:roomId/:clientId', function(req, res, next) {
       //certificate file locally for SSL validation.
       //  Note: loopback scenario follows this code path.
       //  TODO(tkchin): consider async fetch here.
-      //TODO: (kchu): implement send_message_to_collider from python code
-      res.status(500).send('Implement send_message_to_collider');
+      console.log('Forwarding message to collider from room ' + roomId + ' client ' + clientId);
+      var wssParams = getWSSParameters(req);
+      var postOptions = {
+        host: 'apprtc-ws.webrtc.org',//wssParams.host,
+        port: 443,
+        path: '/' + roomId + '/' + clientId,
+        method: 'POST'
+      };
+      var postRequest = https.request(postOptions, function(httpRes) {
+        if (httpRes.statusCode == 200) {
+          res.send({ result: constants.RESPONSE_SUCCESS });
+        } else {
+          console.error('Failed to send message to collider: ' + httpRes.statusCode);
+          // TODO(tkchin): better error handling.
+          res.status(httpRes.statusCode);
+        }
+      });
+      postRequest.write(message);
+      postRequest.end();
     }
   });
-
 });
 
+router.get('/r/:roomId', function(req, res, next) {
+  var roomId = req.params.roomId;
+  var key = getCacheKeyForRoom(req.headers.host, roomId);
+  rooms.get(key, function(error, room) {
+    if (room) {
+      console.log('Room ' + roomId + ' has state ' + room.toString());
+      // Check if room is full
+      if (room.getOccupancy() >= 2) {
+        console.log('Room ' + roomId + ' is full');
+        res.render('full_template', {});
+        return;
+      }
+    }
+    // Parse out room parameters from request.
+    var params = getRoomParameters(req, roomId, null, null);
+    // room_id/room_link will be included in the returned parameters
+    // so the client will launch the requested room.
+    res.render('index_template', params);
+  });
+});
+
+router.post('/leave/:roomId/:clientId', function(req, res, next) {
+  var roomId = req.params.roomId;
+  var clientId = req.params.clientId;
+  var key = getCacheKeyForRoom(req.headers.host, roomId);
+  rooms.get(key, function(error, room) {
+    if (!room) {
+      console.warn('Unknown room: ' + roomId);
+      callback({error: constants.RESPONSE_UNKNOWN_ROOM}, false);
+    } else if (!room.hasClient(clientId)) {
+      console.warn('Unknown client: ' + clientId);
+      callback({error: constants.RESPONSE_UNKNOWN_CLIENT}, false);
+    } else {
+      room.removeClient(clientId, function(error, isRemoved, otherClient) {
+        if (error) {
+          res.send({ result: error });
+          return;
+        }
+        if (room.hasClient(constants.LOOPBACK_CLIENT_ID)) {
+          room.removeClient(constants.LOOPBACK_CLIENT_ID, function(error, isRemoved) {
+            res.send({ result: constants.RESPONSE_SUCCESS });
+          });
+        } else {
+          if (otherClient) {
+            otherClient.isInitiator = true;
+          }
+        }
+      });
+    }
+  });
+  res.send({ result: constants.RESPONSE_SUCCESS });
+});
 
 module.exports = router;
