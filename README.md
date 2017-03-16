@@ -29,4 +29,4 @@ The apprtc-node-server uses ExpressJS. To run the node server after setup just e
 node ./bin/www
 ```
 
-Navigate to `http://localhost:3000` to run the WebRTC Demo
+Navigate to `http://<ip_host>:<port>` to run the WebRTC Demo, such as: `http://107.113.191.149:8080`
