@@ -1,7 +1,7 @@
 # AppRTC - NodeJS implementation of the Google WebRTC Demo
 
 ## About
-AppRTC-node-server is a straight port of the AppRTC Python Server from the Google WebRTC Demo to run entirely in the NodeJS environment.
+AppRTC-node-server is a straight port of the AppRTC Python Server from the Google WebRTC Demo to run entirely in the NodeJS environment with Websocket built in. 
 
 ## Notes
 This still a work in progress. We are in the process of cleaning up the code and making several enhancements:
