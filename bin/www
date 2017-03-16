@@ -7,12 +7,16 @@
 var app = require('../app');
 var debug = require('debug')('AppRTC-node-server:server');
 var http = require('http');
+var Websocket = require('ws');
+
+var IP_HOST = '107.113.191.149';
+var WSS_PORT = '8080';
 
 /**
  * Get port from environment and store in Express.
  */
 
-var port = normalizePort(process.env.PORT || '3000');
+var port = normalizePort(process.env.PORT || WSS_PORT);
 app.set('port', port);
 
 /**
@@ -21,11 +25,49 @@ app.set('port', port);
 
 var server = http.createServer(app);
 
+/** lampv
+ * Create websocket server
+ */
+var webSockets = [];
+var wss = new Websocket.Server({server});
+wss.on('connection', function connection(ws){
+  ws.on('message', function incoming(message){
+    console.log('received: %s', message);
+    var jsonMsg = JSON.parse(message);
+
+    if(jsonMsg.cmd === 'register'){
+      ws.roomid = jsonMsg.roomid;
+      ws.clientid = jsonMsg.clientid;
+      webSockets.push(ws);
+      console.log('roomid:' + ws.roomid + ' clientid:' + ws.clientid + ' webSockets.length:' + webSockets.length);
+    }else if(jsonMsg.cmd === 'send'){
+      console.log('webSockets.length:' + webSockets.length);
+
+      for(i = 0; i < webSockets.length; i++){
+        var socket = webSockets[i];
+        var msgText = JSON.parse(jsonMsg.msg);
+        console.log('socket.clientid:' + socket.clientid);
+
+        if(socket !== ws && socket.roomid == ws.roomid && socket.readyState === socket.OPEN){
+          console.log('send message from:' + socket.clientid + ' to ' + ws.clientid);
+          socket.send(message);
+        }
+      }
+    }
+  });
+
+  ws.on('close', function(){
+    console.log('ws close');
+    webSockets.splice(webSockets.indexOf(ws), 1);
+  });
+});
+
 /**
  * Listen on provided port, on all network interfaces.
  */
+var ip_host = IP_HOST;
 
-server.listen(port);
+server.listen(port, ip_host);
 server.on('error', onError);
 server.on('listening', onListening);
 
@@ -87,4 +129,5 @@ function onListening() {
     ? 'pipe ' + addr
     : 'port ' + addr.port;
   debug('Listening on ' + bind);
+  console.log('Listening on ' + ip_host + ' and ' + bind);
 }

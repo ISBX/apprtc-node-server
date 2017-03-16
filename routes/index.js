@@ -7,13 +7,17 @@ var router = express.Router();
 var Rooms = require('../lib/rooms.js');
 var rooms = new Rooms();
 
+var IP_HOST = '107.113.191.149';
+var WSS_PORT = '8080';
+
 var constants = {
   LOOPBACK_CLIENT_ID: 'LOOPBACK_CLIENT_ID',
   TURN_BASE_URL: 'https://computeengineondemand.appspot.com',
   TURN_URL_TEMPLATE: '%s/turn?username=%s&key=%s',
   CEOD_KEY: '4080218913',
   WSS_HOST_ACTIVE_HOST_KEY: 'wss_host_active_host', //memcache key for the active collider host.
-  WSS_HOST_PORT_PAIRS: ['apprtc-ws.webrtc.org:443', 'apprtc-ws-2.webrtc.org:443'],
+  //WSS_HOST_PORT_PAIRS: ['apprtc-ws.webrtc.org:443', 'apprtc-ws-2.webrtc.org:443'],
+  WSS_HOST_PORT_PAIRS: [IP_HOST + ':' + WSS_PORT, IP_HOST + ':' + WSS_PORT],
   RESPONSE_ERROR: 'ERROR',
   RESPONSE_UNKNOWN_ROOM: 'UNKNOWN_ROOM',
   RESPONSE_UNKNOWN_CLIENT: 'UNKNOWN_CLIENT',
@@ -21,12 +25,28 @@ var constants = {
   RESPONSE_DUPLICATE_CLIENT: 'DUPLICATE_CLIENT',
   RESPONSE_SUCCESS: 'SUCCESS',
   RESPONSE_INVALID_REQUEST: 'INVALID_REQUEST'
-
 };
 
-
+constants.TURN_SERVER_OVERRIDE = [
+{
+   "urls": [
+     "turn:173.194.72.127:19305?transport=udp",
+   "turn:[2404:6800:4008:C01::7F]:19305?transport=udp",
+   "turn:173.194.72.127:443?transport=tcp",
+   "turn:[2404:6800:4008:C01::7F]:443?transport=tcp"
+   ],
+   "username": "CKjCuLwFEgahxNRjuTAYzc/s6OMT",
+   "credential": "u1SQDR/SQsPQIxXNWQT7czc/G4c="
+ },
+ {
+   "urls": [
+     "stun:stun.l.google.com:19302"
+   ]
+ }
+]
 
 function generateRandom(length) {
+  console.log('function generateRandom');
   var word = '';
   for (var i = 0; i < length; i++) {
     word += Math.floor((Math.random() * 10));
@@ -36,6 +56,7 @@ function generateRandom(length) {
 
 // HD is on by default for desktop Chrome, but not Android or Firefox (yet)
 function getHDDefault(userAgent) {
+  console.log('function getHDDefault');
   if (userAgent.indexOf('Android') > -1 || userAgent.indexOf('Chrome') == -1) {
     return false;
   }
@@ -44,6 +65,7 @@ function getHDDefault(userAgent) {
 
 // iceServers will be filled in by the TURN HTTP request.
 function makePCConfig(iceTransports) {
+  console.log('function makePCConfig');
   var config = { iceServers: [] };
   if (iceTransports) {
     config.iceTransports = iceTransports;
@@ -52,6 +74,7 @@ function makePCConfig(iceTransports) {
 }
 
 function maybeAddConstraint(constraints, param, constraint) {
+  console.log('function maybeAddConstraint');
   var object = {};
   if (param && param.toLowerCase() == 'true') {
     object[constraint] = true;
@@ -64,6 +87,7 @@ function maybeAddConstraint(constraints, param, constraint) {
 }
 
 function makePCConstraints(dtls, dscp, ipv6) {
+  console.log('function makePCConstraints');
   var constraints = { optional: [] };
   maybeAddConstraint(constraints, dtls, 'DtlsSrtpKeyAgreement');
   maybeAddConstraint(constraints, dscp, 'googDscp');
@@ -72,6 +96,7 @@ function makePCConstraints(dtls, dscp, ipv6) {
 }
 
 function addMediaTrackConstraint(trackConstraints, constraintString) {
+  console.log('function addMediaTrackConstraint');
   var tokens = constraintString.split(':');
   var mandatory = true;
   if (tokens.length == 2) {
@@ -100,6 +125,7 @@ function addMediaTrackConstraint(trackConstraints, constraintString) {
 }
 
 function makeMediaTrackConstraints(constraintsString) {
+  console.log('function makeMediaTrackConstraints');
   var trackConstraints;
   if (!constraintsString || constraintsString.toLowerCase() == 'true') {
     trackConstraints = true;
@@ -117,6 +143,7 @@ function makeMediaTrackConstraints(constraintsString) {
 }
 
 function makeMediaStreamConstraints(audio, video, firefoxFakeDevice) {
+  console.log('function makeMediaStreamConstraints');
   var streamConstraints = {
     audio: makeMediaTrackConstraints(audio),
     video: makeMediaTrackConstraints(video)
@@ -126,9 +153,10 @@ function makeMediaStreamConstraints(audio, video, firefoxFakeDevice) {
 }
 
 function getWSSParameters(req) {
+  console.log('function getWSSParameters');
   var wssHostPortPair = req.query['wshpp'];
   var wssTLS = req.query['wstls'];
-
+  console.log('wssTLS: ' + wssTLS);
   if (!wssHostPortPair) {
     // Attempt to get a wss server from the status provided by prober,
     // if that fails, use fallback value.
@@ -143,8 +171,9 @@ function getWSSParameters(req) {
       wssHostPortPair = constants.WSS_HOST_PORT_PAIRS[0];
     //}
   }
-
-  if (wssTLS && wssTLS == 'false') {
+  // lampv: adding wssTLS === underfined
+  if ((wssTLS && wssTLS == 'false') || wssTLS === undefined) {
+  //if (wssTLS && wssTLS == 'false') {
     return {
       wssUrl: 'ws://' + wssHostPortPair + '/ws',
       wssPostUrl: 'http://' + wssHostPortPair,
@@ -160,11 +189,13 @@ function getWSSParameters(req) {
 }
 
 function getVersionInfo() {
+  console.log('function getVersionInfo');
   //TODO: parse version_info.json
   return undefined;
 }
 
 function getRoomParameters(req, roomId, clientId, isInitiator) {
+  console.log('function getRoomParameters');
   var errorMessages = [];
   var userAgent = req.headers['user-agent'];
   //Which ICE candidates to allow. This is useful for forcing a call to run over TURN, by setting it=relay.
@@ -285,7 +316,8 @@ function getRoomParameters(req, roomId, clientId, isInitiator) {
     'wss_url': wssUrl,
     'wss_post_url': wssPostUrl,
     'bypass_join_confirmation': JSON.stringify(bypassJoinConfirmation),
-    'version_info': JSON.stringify(getVersionInfo())
+    'version_info': JSON.stringify(getVersionInfo()),
+	  'turn_server_override': constants.TURN_SERVER_OVERRIDE
   };
 
   var protocol = req.headers['x-forwarded-proto'];
@@ -305,11 +337,14 @@ function getRoomParameters(req, roomId, clientId, isInitiator) {
 }
 
 function getCacheKeyForRoom(host, roomId) {
+  console.log('function getCacheKeyForRoom');
   return host + "/" + roomId;
 }
 
 function addClientToRoom(req, roomId, clientId, isLoopback, callback) {
+  console.log('function addClientToRoom');
   var key = getCacheKeyForRoom(req.headers.host, roomId);
+  console.log('key:' + key);
   rooms.createIfNotExist(key, function(error, room) {
     if (error) {
       callback(error);
@@ -335,15 +370,15 @@ function addClientToRoom(req, roomId, clientId, isLoopback, callback) {
         }
         var messages = otherClient ? otherClient.messages : [];
         if (otherClient) otherClient.clearMessages();
-        console.log('Added client ' + clientId + ' in room ' + roomId);
+        console.log('Added client ' + clientId + ' in room ' + roomId + ' room: '+  room);
         callback(null, { is_initiator: client.isInitiator, messages: messages, room_state: room.toString() });
       });
     }
-
   });
 }
 
 function saveMessageFromClient(host, roomId, clientId, message, callback) {
+  console.log('function saveMessageFromClient');
   var text = message;
   var key = getCacheKeyForRoom(host, roomId);
   rooms.get(key, function(error, room) {
@@ -358,7 +393,7 @@ function saveMessageFromClient(host, roomId, clientId, message, callback) {
     } else {
       var client = room.getClient(clientId);
       client.addMessage(text);
-      console.log('Saved message for client ' + clientId + ':' + client.toString() + ' in room ' + roomId);
+      console.log('Saved message for client ' + clientId + ':' + client.toString() + ' in room ' + roomId + ' msg:' + text);
       callback(null, true);
     }
   });
@@ -366,11 +401,13 @@ function saveMessageFromClient(host, roomId, clientId, message, callback) {
 
 router.get('/', function(req, res, next) {
   // Parse out parameters from request.
+  console.log('router.get //');
   var params = getRoomParameters(req, null, null, null);
   res.render("index_template", params);
 });
 
 router.post('/join/:roomId', function(req, res, next) {
+  console.log('router.post //join//:roomId');
   var roomId = req.params.roomId;
   var clientId = generateRandom(8);
   var isLoopback = req.query['debug'] == 'loopback';
@@ -395,6 +432,7 @@ router.post('/join/:roomId', function(req, res, next) {
 });
 
 router.post('/message/:roomId/:clientId', function(req, res, next) {
+  console.log('post //message//:roomId//:clientId');
   var roomId = req.params.roomId;
   var clientId = req.params.clientId;
   var message = req.body;
@@ -414,8 +452,8 @@ router.post('/message/:roomId/:clientId', function(req, res, next) {
       console.log('Forwarding message to collider from room ' + roomId + ' client ' + clientId);
       var wssParams = getWSSParameters(req);
       var postOptions = {
-        host: 'apprtc-ws.webrtc.org',//wssParams.host,
-        port: 443,
+        host: IP_HOST,//wssParams.host,
+        port: WSS_PORT,
         path: '/' + roomId + '/' + clientId,
         method: 'POST'
       };
@@ -435,6 +473,7 @@ router.post('/message/:roomId/:clientId', function(req, res, next) {
 });
 
 router.get('/r/:roomId', function(req, res, next) {
+  console.log('router.get //r//:roomId');
   var roomId = req.params.roomId;
   var key = getCacheKeyForRoom(req.headers.host, roomId);
   rooms.get(key, function(error, room) {
@@ -456,6 +495,7 @@ router.get('/r/:roomId', function(req, res, next) {
 });
 
 router.post('/leave/:roomId/:clientId', function(req, res, next) {
+  console.log('router.post //leave//:roomID//:clientId');
   var roomId = req.params.roomId;
   var clientId = req.params.clientId;
   var key = getCacheKeyForRoom(req.headers.host, roomId);
@@ -469,9 +509,11 @@ router.post('/leave/:roomId/:clientId', function(req, res, next) {
     } else {
       room.removeClient(clientId, function(error, isRemoved, otherClient) {
         if (error) {
+          console.log('send respond error');
           res.send({ result: error });
           return;
         }
+
         if (room.hasClient(constants.LOOPBACK_CLIENT_ID)) {
           room.removeClient(constants.LOOPBACK_CLIENT_ID, function(error, isRemoved) {
             res.send({ result: constants.RESPONSE_SUCCESS });
@@ -484,6 +526,12 @@ router.post('/leave/:roomId/:clientId', function(req, res, next) {
       });
     }
   });
+  console.log('send respond success');
+  res.send({ result: constants.RESPONSE_SUCCESS });
+});
+
+router.post('/DELETE/:roomId/:clientId', function(req, res, next){
+  console.log('router.post //DELETE//:roomID//:clientId');
   res.send({ result: constants.RESPONSE_SUCCESS });
 });
 
